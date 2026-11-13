@@ -6,6 +6,8 @@ Serverless website uptime monitor. No servers, no pipelines.
 
 **Services:** EventBridge, Lambda, Step Functions, DynamoDB (GSI + TTL), SNS, API Gateway.
 
+**Live status page:** https://nupzqdko90.execute-api.us-east-1.amazonaws.com/Prod/
+
 ## How it works
 1. EventBridge triggers the Dispatcher Lambda every 5 minutes.
 2. Dispatcher queries DynamoDB (GSI, no scans) and starts one Step Functions execution per site.
