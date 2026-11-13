@@ -1,4 +1,6 @@
-# UptimePulse
+   # UptimePulse
+
+   ![Architecture](uptimepulse-architecture.png)
 
 Serverless website uptime monitor. No servers, no pipelines.
 
