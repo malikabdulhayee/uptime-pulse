@@ -1,0 +1,57 @@
+{
+  "Comment": "UptimePulse: ping, recheck after 20s if failing, then record and alert on state change",
+  "StartAt": "FirstPing",
+  "States": {
+    "FirstPing": {
+      "Type": "Task",
+      "Resource": "${PingFunctionArn}",
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Next": "FirstResult"
+    },
+    "FirstResult": {
+      "Type": "Choice",
+      "Choices": [
+        { "Variable": "$.is_up", "BooleanEquals": true, "Next": "RecordResult" }
+      ],
+      "Default": "WaitBeforeRecheck"
+    },
+    "WaitBeforeRecheck": {
+      "Type": "Wait",
+      "Seconds": 20,
+      "Next": "SecondPing"
+    },
+    "SecondPing": {
+      "Type": "Task",
+      "Resource": "${PingFunctionArn}",
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Next": "RecordResult"
+    },
+    "RecordResult": {
+      "Type": "Task",
+      "Resource": "${ProcessFunctionArn}",
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "End": true
+    }
+  }
+}

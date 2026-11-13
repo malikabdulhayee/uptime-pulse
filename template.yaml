@@ -1,0 +1,185 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: UptimePulse - serverless uptime monitor (Step Functions recheck flow, state-change alerts)
+
+Parameters:
+  AlertEmail:
+    Type: String
+    Description: Email address that receives DOWN / RECOVERED alerts
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 15
+    MemorySize: 128
+    CodeUri: src/
+
+Resources:
+  UptimeTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref AlertEmail
+
+  UptimeApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Auth:
+        ApiKeyRequired: false
+        UsagePlan:
+          CreateUsagePlan: PER_API
+          UsagePlanName: UptimePulseUsagePlan
+          Throttle:
+            RateLimit: 5
+            BurstLimit: 10
+
+  PingFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.ping_handler
+      Timeout: 15
+
+  ProcessFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.process_handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UptimeTable
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt AlertTopic.TopicName
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref UptimeTable
+          SNS_TOPIC_ARN: !Ref AlertTopic
+
+  MonitorStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: statemachine/monitor.asl.json
+      DefinitionSubstitutions:
+        PingFunctionArn: !GetAtt PingFunction.Arn
+        ProcessFunctionArn: !GetAtt ProcessFunction.Arn
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref PingFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref ProcessFunction
+
+  DispatcherFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.dispatcher_handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref UptimeTable
+        - StepFunctionsExecutionPolicy:
+            StateMachineName: !GetAtt MonitorStateMachine.Name
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref UptimeTable
+          STATE_MACHINE_ARN: !Ref MonitorStateMachine
+      Events:
+        Schedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(5 minutes)
+            Enabled: true
+
+  RegisterFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.register_handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UptimeTable
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref UptimeTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref UptimeApi
+            Path: /register
+            Method: post
+            Auth:
+              ApiKeyRequired: true
+
+  StatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.status_handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref UptimeTable
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref UptimeTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref UptimeApi
+            Path: /status
+            Method: get
+
+  FrontendFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.frontend_handler
+      Events:
+        Root:
+          Type: Api
+          Properties:
+            RestApiId: !Ref UptimeApi
+            Path: /
+            Method: get
+
+Outputs:
+  StatusPageUrl:
+    Description: Open this in a browser (status page)
+    Value: !Sub "https://${UptimeApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+  RegisterUrl:
+    Description: POST here (with x-api-key header) to add a site
+    Value: !Sub "https://${UptimeApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/register"
+  ApiKeyId:
+    Description: API key ID (get the key value with the aws apigateway get-api-key command)
+    Value: !Ref UptimeApiApiKey
+  DispatcherName:
+    Value: !Ref DispatcherFunction
+  StateMachineArn:
+    Value: !Ref MonitorStateMachine

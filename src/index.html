@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>UptimePulse</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 860px; margin: 40px auto; padding: 0 20px; background: #f8fafc; color: #1e293b; }
+    .header { display: flex; justify-content: space-between; align-items: center; }
+    h1 { margin: 0; color: #0f172a; }
+    button { background: #2563eb; color: #fff; border: 0; padding: 10px 18px; border-radius: 8px; cursor: pointer; font-size: 1rem; }
+    .card { background: #fff; border-radius: 12px; padding: 18px 20px; margin-top: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.1); display: flex; justify-content: space-between; align-items: center; border-left: 6px solid #94a3b8; }
+    .card.up { border-left-color: #16a34a; }
+    .card.down { border-left-color: #dc2626; }
+    .url { font-weight: 600; font-size: 1.05rem; word-break: break-all; }
+    .meta { color: #64748b; font-size: .88rem; margin-top: 4px; }
+    .badge { font-weight: 700; }
+    .up .badge { color: #16a34a; }
+    .down .badge { color: #dc2626; }
+    .pending .badge { color: #64748b; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>UptimePulse</h1>
+    <button id="refresh">Refresh</button>
+  </div>
+  <p class="meta">Last updated: <span id="last">-</span> (auto-refreshes every 30s)</p>
+  <div id="results"></div>
+
+  <script>
+    async function load() {
+      const box = document.getElementById('results');
+      try {
+        const res = await fetch('status');
+        const data = await res.json();
+        document.getElementById('last').textContent = new Date().toLocaleString();
+        box.textContent = '';
+        if (!data.length) {
+          const p = document.createElement('p');
+          p.textContent = 'No sites registered yet.';
+          box.appendChild(p);
+          return;
+        }
+        data.forEach(s => {
+          const pending = s.status === 'pending';
+          const card = document.createElement('div');
+          card.className = 'card ' + (pending ? 'pending' : (s.is_up ? 'up' : 'down'));
+
+          const left = document.createElement('div');
+          const url = document.createElement('div');
+          url.className = 'url';
+          url.textContent = s.url;
+          const meta = document.createElement('div');
+          meta.className = 'meta';
+          let text = pending ? 'Waiting for first check' :
+            'HTTP ' + s.status + ' | ' + s.latency_ms + ' ms | checked ' + new Date(s.checked_at).toLocaleTimeString();
+          if (!s.is_up && s.down_since) text += ' | down since ' + new Date(s.down_since).toLocaleTimeString();
+          meta.textContent = text;
+          left.appendChild(url);
+          left.appendChild(meta);
+
+          const badge = document.createElement('div');
+          badge.className = 'badge';
+          badge.textContent = pending ? 'PENDING' : (s.is_up ? 'UP' : 'DOWN');
+
+          card.appendChild(left);
+          card.appendChild(badge);
+          box.appendChild(card);
+        });
+      } catch (e) {
+        box.textContent = 'Error loading status: ' + e.message;
+      }
+    }
+    document.getElementById('refresh').onclick = load;
+    load();
+    setInterval(load, 30000);
+  </script>
+</body>
+</html>
